@@ -1,22 +1,4 @@
 /* eslint-disable import/newline-after-import,import/first */
-// 添加 jest 全局对象模拟来解决 jest-canvas-mock 的兼容性问题
-import { vi, expect } from 'vitest';
-
-// 模拟全局 jest 对象
-global.jest = {
-  fn: vi.fn,
-  spyOn: vi.spyOn,
-  mock: vi.mock,
-  doMock: vi.doMock,
-  unmock: vi.unmock,
-  clearAllMocks: vi.clearAllMocks,
-  resetAllMocks: vi.resetAllMocks,
-  restoreAllMocks: vi.restoreAllMocks,
-  mocked: vi.mocked,
-  hoisted: vi.hoisted,
-  expect
-};
-
 import '@testing-library/jest-dom';
 import { theme } from 'antd';
 // mock indexedDB to test with dexie
