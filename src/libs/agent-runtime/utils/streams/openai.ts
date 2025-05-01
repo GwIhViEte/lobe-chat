@@ -40,6 +40,16 @@ export const transformOpenAIStream = (
   }
 
   try {
+    if (!chunk.choices || !Array.isArray(chunk.choices) || chunk.choices.length === 0) {
+      
+      if (chunk.usage) {
+        const usage = chunk.usage;
+        return { data: convertUsage(usage), id: chunk.id, type: 'usage' };
+      }
+      
+      console.warn('[StreamChunkError] No valid choices in chunk:', chunk);
+      return { data: chunk, id: chunk.id, type: 'data' };
+    }
     // maybe need another structure to add support for multiple choices
     const item = chunk.choices[0];
     if (!item) {
