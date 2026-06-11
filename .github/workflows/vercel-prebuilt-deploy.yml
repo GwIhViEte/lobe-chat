@@ -1,0 +1,159 @@
+name: Vercel Prebuilt Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: Vercel environment to deploy
+        required: true
+        default: production
+        type: choice
+        options:
+          - preview
+          - production
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vercel-prebuilt-${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'production' }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 24.11.1
+  TARGET_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'production' }}
+  VERCEL: '1'
+  VERCEL_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'production' }}
+  NEXT_PUBLIC_VERCEL_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'production' }}
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+  FFMPEG_BINARIES_URL: https://cdn.npmmirror.com/binaries/ffmpeg-static
+  npm_config_ffmpeg_binaries_url: https://cdn.npmmirror.com/binaries/ffmpeg-static
+
+jobs:
+  deploy:
+    name: Deploy prebuilt output
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Setup Bun
+        run: |
+          npm install --global bun@1.3.14
+
+      - name: Check tool versions
+        run: |
+          node --version
+          pnpm --version
+          bun --version
+
+      - name: Restore build caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            .next/cache
+            .vercel/cache
+          key: ${{ runner.os }}-vercel-prebuilt-${{ env.TARGET_ENVIRONMENT }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-vercel-prebuilt-${{ env.TARGET_ENVIRONMENT }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            ${{ runner.os }}-vercel-prebuilt-${{ env.TARGET_ENVIRONMENT }}-
+
+      - name: Install dependencies
+        run: |
+          pnpm install || pnpm install || pnpm install
+
+      - name: Validate Vercel secrets
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          APP_URL_PRODUCTION: ${{ secrets.APP_URL_PRODUCTION }}
+        run: |
+          missing=0
+
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::VERCEL_TOKEN is missing"
+            missing=1
+          fi
+
+          if [ -z "$VERCEL_ORG_ID" ]; then
+            echo "::error::VERCEL_ORG_ID is missing"
+            missing=1
+          fi
+
+          if [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "::error::VERCEL_PROJECT_ID is missing"
+            missing=1
+          fi
+
+          if [ -z "$APP_URL_PRODUCTION" ]; then
+            echo "::error::APP_URL_PRODUCTION is missing"
+            missing=1
+          fi
+
+          exit "$missing"
+
+      - name: Set APP_URL
+        env:
+          APP_URL_PRODUCTION: ${{ secrets.APP_URL_PRODUCTION }}
+        run: |
+          echo "APP_URL=$APP_URL_PRODUCTION" >> "$GITHUB_ENV"
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel project settings
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment="$TARGET_ENVIRONMENT" --token="$VERCEL_TOKEN"
+
+      - name: Build Vercel output
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ "$TARGET_ENVIRONMENT" = "production" ]; then
+            vercel build --prod --token="$VERCEL_TOKEN"
+          else
+            vercel build --token="$VERCEL_TOKEN"
+          fi
+
+      - name: Verify prebuilt output
+        run: test -d .vercel/output
+
+      - name: Deploy prebuilt output
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ "$TARGET_ENVIRONMENT" = "production" ]; then
+            deployment_url="$(vercel deploy --prebuilt --archive=tgz --prod --token="$VERCEL_TOKEN")"
+          else
+            deployment_url="$(vercel deploy --prebuilt --archive=tgz --token="$VERCEL_TOKEN")"
+          fi
+
+          echo "$deployment_url"
+          echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
+
+      - name: Write deployment summary
+        run: |
+          echo "## Vercel Prebuilt Deploy" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Environment: \`$TARGET_ENVIRONMENT\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Deployment: ${{ steps.deploy.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
