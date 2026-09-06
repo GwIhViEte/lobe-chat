@@ -11,6 +11,7 @@ import {
   tasks,
   topics,
   users,
+  workspaces,
 } from '../../schemas';
 import type { LobeChatDatabase } from '../../type';
 import { RecentModel } from '../recent';
@@ -162,6 +163,34 @@ describe('RecentModel', () => {
         const result = await recentModel.queryRecent();
         expect(result).toHaveLength(1);
         expect(result[0].id).toBe('topic-real');
+      });
+
+      it('excludes agent-share visitor topics', async () => {
+        // Agent-share visitor topics keep the creator's userId, but a non-null
+        // senderId marks them as visitor traffic that must not surface in the
+        // creator's own Recent feed.
+        await serverDB.insert(agents).values({ id: 'agent-share-recent', userId, virtual: false });
+
+        await serverDB.insert(topics).values([
+          {
+            id: 'topic-visitor-recent',
+            userId,
+            agentId: 'agent-share-recent',
+            senderId: 'visitor-user-x',
+            title: 'visitor topic',
+            updatedAt: minutesAgo(1),
+          },
+          {
+            id: 'topic-creator-recent',
+            userId,
+            agentId: 'agent-share-recent',
+            title: 'creator topic',
+            updatedAt: minutesAgo(5),
+          },
+        ]);
+
+        const result = await recentModel.queryRecent();
+        expect(result.map((r) => r.id)).toEqual(['topic-creator-recent']);
       });
 
       it('excludes topics on virtual agents that are not in a group', async () => {
@@ -609,6 +638,32 @@ describe('RecentModel', () => {
         expect(result[1].lastAssistantMessage).toBe('Last assistant answer');
       });
 
+      it('strips markdown syntax from topic previews', async () => {
+        await serverDB.insert(agents).values({ id: 'agent-inbox', userId, slug: 'inbox' });
+        await serverDB.insert(topics).values({
+          agentId: 'agent-inbox',
+          id: 'topic-markdown-preview',
+          status: 'active',
+          updatedAt: minutesAgo(1),
+          userId,
+        });
+        await serverDB.insert(messages).values({
+          agentId: 'agent-inbox',
+          content:
+            '## Heading\n\nSome **bold** text with a [link](https://example.com) and `code`.',
+          id: 'markdown-preview-message',
+          role: 'assistant',
+          topicId: 'topic-markdown-preview',
+          userId,
+        });
+
+        const result = await recentModel.queryRecent(1, ['topic'], true);
+
+        expect(result[0].lastAssistantMessage).toBe(
+          'Heading\n\nSome bold text with a link and code.',
+        );
+      });
+
       it('returns Date objects for updatedAt', async () => {
         await serverDB.insert(agents).values({ id: 'agent-inbox', userId, slug: 'inbox' });
         await serverDB.insert(topics).values({
@@ -620,6 +675,50 @@ describe('RecentModel', () => {
 
         const [row] = await recentModel.queryRecent();
         expect(row.updatedAt).toBeInstanceOf(Date);
+      });
+    });
+
+    describe('workspace mode', () => {
+      const workspaceId = 'recent-model-test-workspace';
+      const workspaceModel = new RecentModel(serverDB, userId, workspaceId);
+
+      beforeEach(async () => {
+        await serverDB
+          .insert(workspaces)
+          .values({ id: workspaceId, name: 'ws', primaryOwnerId: userId, slug: workspaceId });
+        await serverDB.insert(agents).values({ id: 'agent-ws', userId, slug: 'inbox' });
+        await serverDB.insert(topics).values([
+          {
+            agentId: 'agent-ws',
+            id: 'topic-ws-mine',
+            title: 'mine',
+            updatedAt: minutesAgo(1),
+            userId,
+            workspaceId,
+          },
+          {
+            agentId: 'agent-ws',
+            id: 'topic-ws-other',
+            title: 'other',
+            updatedAt: minutesAgo(2),
+            userId: otherUserId,
+            workspaceId,
+          },
+        ]);
+      });
+
+      it('returns every member topic with its author userId', async () => {
+        const result = await workspaceModel.queryRecent();
+
+        expect(result.map((r) => r.id)).toEqual(['topic-ws-mine', 'topic-ws-other']);
+        expect(result.map((r) => r.userId)).toEqual([userId, otherUserId]);
+      });
+
+      it('narrows to the viewer own topics when mineOnly is set', async () => {
+        const result = await workspaceModel.queryRecent(10, ['topic'], false, true);
+
+        expect(result.map((r) => r.id)).toEqual(['topic-ws-mine']);
+        expect(result[0].userId).toBe(userId);
       });
     });
   });
