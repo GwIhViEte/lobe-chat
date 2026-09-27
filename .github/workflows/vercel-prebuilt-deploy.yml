@@ -124,6 +124,13 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment="$TARGET_ENVIRONMENT" --token="$VERCEL_TOKEN"
 
+      - name: Enable Vercel Large Functions
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          printf '%s\n' '1' | vercel env add VERCEL_SUPPORT_LARGE_FUNCTIONS "$TARGET_ENVIRONMENT" --force --token="$VERCEL_TOKEN"
+          vercel pull --yes --environment="$TARGET_ENVIRONMENT" --token="$VERCEL_TOKEN"
+
       - name: Build Vercel output
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
