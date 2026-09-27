@@ -30,6 +30,7 @@ env:
   NEXT_PUBLIC_VERCEL_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || 'production' }}
   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+  VERCEL_SUPPORT_LARGE_FUNCTIONS: '1'
 
   FFMPEG_BINARIES_URL: https://cdn.npmmirror.com/binaries/ffmpeg-static
   npm_config_ffmpeg_binaries_url: https://cdn.npmmirror.com/binaries/ffmpeg-static
